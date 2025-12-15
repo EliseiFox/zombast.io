@@ -2,7 +2,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import path from 'path';
-import { SOCKET_EVENTS, SERVER_PORT } from '@shared/constants';
+import { SOCKET_EVENTS, SERVER_PORT, WORLD_SIZE } from '@shared/constants';
 import { Player } from './entities/Player';
 import { IInput } from '@shared/types';
 
@@ -12,10 +12,21 @@ const io = new Server(httpServer, {
     cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// Хранилище игроков: ID -> Player
+
+
+// Хранилище
 const players: Record<string, Player> = {};
-// Хранилище текущего ввода: ID -> Input
 const inputs: Record<string, IInput> = {};
+
+// Генерируем ресурсы (Деревья)
+const resources: { id: number, x: number, y: number }[] = [];
+for (let i = 0; i < 50; i++) { // 50 деревьев
+    resources.push({
+        id: i,
+        x: Math.random() * WORLD_SIZE,
+        y: Math.random() * WORLD_SIZE
+    });
+}
 
 app.use(express.static(path.join(__dirname, '../../public')));
 
@@ -26,7 +37,15 @@ io.on(SOCKET_EVENTS.CONNECT, (socket) => {
     players[socket.id] = new Player(socket.id);
     inputs[socket.id] = { up: false, down: false, left: false, right: false };
 
-    // Слушаем ввод от клиента
+    // Переопределим координаты, чтобы использовать весь WORLD_SIZE
+    players[socket.id].x = Math.random() * WORLD_SIZE;
+    players[socket.id].y = Math.random() * WORLD_SIZE;
+
+    inputs[socket.id] = { up: false, down: false, left: false, right: false };
+
+    // ОТПРАВЛЯЕМ ИГРОКУ ДАННЫЕ О МИРЕ (Деревья)
+    socket.emit(SOCKET_EVENTS.INIT_WORLD, resources);
+
     socket.on('input', (data: IInput) => {
         inputs[socket.id] = data;
     });

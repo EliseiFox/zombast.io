@@ -1,4 +1,5 @@
 import { IPlayer, IInput } from '@shared/types';
+import { WORLD_SIZE } from '@shared/constants';
 
 export class Player implements IPlayer {
     public id: string;
@@ -22,8 +23,8 @@ export class Player implements IPlayer {
         if (input.left) this.x -= this.speed;
         if (input.right) this.x += this.speed;
 
-        // Ограничение границами мира (0-800, 0-600)
-        this.x = Math.max(0, Math.min(800, this.x));
-        this.y = Math.max(0, Math.min(600, this.y));
+        // Ограничение границами мира (0-WORLD_SIZE, 0-WORLD_SIZE)
+        this.x = Math.max(0, Math.min(WORLD_SIZE, this.x));
+        this.y = Math.max(0, Math.min(WORLD_SIZE, this.y));
     }
 }
