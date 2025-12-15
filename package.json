@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev:client": "vite",
-    "dev:server": "ts-node-dev --respawn --transpile-only src/server/index.ts",
+    "dev:server": "ts-node-dev -r tsconfig-paths/register --respawn --transpile-only src/server/index.ts",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "build": "vite build && tsc"
   },
@@ -23,6 +23,7 @@
     "@types/node": "^25.0.2",
     "concurrently": "^9.2.1",
     "ts-node-dev": "^2.0.0",
+    "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.0"
   }
