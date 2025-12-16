@@ -4,7 +4,7 @@ import { Server } from 'socket.io';
 import path from 'path';
 import { SOCKET_EVENTS, SERVER_PORT, WORLD_SIZE } from '@shared/constants';
 import { Player } from './entities/Player';
-import { IInput } from '@shared/types';
+import { IInput, IResource } from '@shared/types';
 
 const app = express();
 const httpServer = createServer(app);
@@ -19,12 +19,13 @@ const players: Record<string, Player> = {};
 const inputs: Record<string, IInput> = {};
 
 // Генерируем ресурсы (Деревья)
-const resources: { id: number, x: number, y: number }[] = [];
+let resources: IResource[] = [];
 for (let i = 0; i < 50; i++) { // 50 деревьев
     resources.push({
         id: i,
         x: Math.random() * WORLD_SIZE,
-        y: Math.random() * WORLD_SIZE
+        y: Math.random() * WORLD_SIZE,
+        type: 'tree'
     });
 }
 
@@ -50,6 +51,47 @@ io.on(SOCKET_EVENTS.CONNECT, (socket) => {
         inputs[socket.id] = data;
     });
 
+    // Обработка поворота мыши
+    socket.on(SOCKET_EVENTS.PLAYER_ROTATE, (angle: number) => {
+        if (players[socket.id]) {
+            players[socket.id].r = angle;
+        }
+    });
+
+    // Обработка Атаки (Клик)
+    socket.on(SOCKET_EVENTS.PLAYER_ATTACK, () => {
+        const player = players[socket.id];
+        if (!player) return;
+
+        // Сообщаем ВСЕМ клиентам (включая самого игрока), что этот игрок ударил.
+        // Клиенты сами решат, какой рукой махнуть.
+        io.emit(SOCKET_EVENTS.PLAYER_ANIMATION, { id: socket.id, type: 'punch' });
+
+        // Проверяем коллизию с каждым деревом
+        // В реальной игре нужен QuadTree, но для 50 деревьев цикл сойдет
+        for (let i = 0; i < resources.length; i++) {
+            const res = resources[i];
+            // Теорема Пифагора: расстояние между двумя точками
+            const dx = res.x - player.x;
+            const dy = res.y - player.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+
+            if (dist < 70) { // 60px - радиус удара (20 тело + 20 дерево + 30 запас)
+                // Удаляем ресурс
+                resources.splice(i, 1);
+                
+                // Даем лут
+                player.inventory.wood += 10;
+
+                // Сообщаем всем, что дерево исчезло
+                io.emit(SOCKET_EVENTS.RESOURCE_DESTROYED, res.id);
+                
+                // Прерываем цикл (за один клик рубим одно дерево)
+                break;
+            }
+        }
+    });
+    
     socket.on(SOCKET_EVENTS.DISCONNECT, () => {
         console.log(`[-] Игрок ${socket.id}`);
         delete players[socket.id];

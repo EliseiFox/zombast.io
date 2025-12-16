@@ -5,8 +5,14 @@ export class Player implements IPlayer {
     public id: string;
     public x: number;
     public y: number;
+    public r: number = 0;
     public color: number;
     public speed: number = 5;
+
+    public inventory = {
+        wood: 0,
+        stone: 0
+    };
 
     constructor(id: string) {
         this.id = id;

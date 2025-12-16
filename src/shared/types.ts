@@ -2,7 +2,12 @@ export interface IPlayer {
     id: string;
     x: number;
     y: number;
-    color: number; // Hex color (0xff0000)
+    r: number; // Угол поворота (в радианах)
+    color: number;
+    inventory: {
+        wood: number;
+        stone: number;
+    };
 }
 
 export interface IInput {
@@ -10,4 +15,13 @@ export interface IInput {
     down: boolean;
     left: boolean;
     right: boolean;
+    // Мышку будем слать отдельным событием, чтобы не спамить в каждом тике
+}
+
+// Структура дерева
+export interface IResource {
+    id: number;
+    x: number;
+    y: number;
+    type: 'tree' | 'stone';
 }
