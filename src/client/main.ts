@@ -50,7 +50,16 @@ class GameScene extends Phaser.Scene {
     }
 
     create() {
-        this.socket = io('http://localhost:3000');
+        // УНИВЕРСАЛЬНОЕ ПОДКЛЮЧЕНИЕ
+        // Проверяем: если в браузере в адресе "localhost" или "127.0.0.1", значит мы разрабатываем.
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        
+        // Если локально -> стучимся на порт 3000.
+        // Если на Render -> стучимся на текущий хост (undefined).
+        const serverUrl = isLocal ? 'http://localhost:3000' : undefined;
+        
+        this.socket = io(serverUrl);
+
         this.physics.world.setBounds(0, 0, WORLD_SIZE, WORLD_SIZE);
         this.add.grid(WORLD_SIZE/2, WORLD_SIZE/2, WORLD_SIZE, WORLD_SIZE, TILE_SIZE, TILE_SIZE, 0x004400).setAltFillStyle(0x003300).setOutlineStyle();
         this.resourcesGroup = this.add.group();

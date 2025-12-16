@@ -12,6 +12,13 @@ const io = new Server(httpServer, {
     cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
+// ВАЖНО: Render выдает порт через переменную окружения
+const PORT = process.env.PORT || 3000;
+
+// ВАЖНО: Раздаем папку 'dist', которую создаст Vite при сборке
+// Мы будем запускать сервер из корня проекта, поэтому путь просто 'dist'
+app.use(express.static(path.join(process.cwd(), 'dist')));
+
 
 
 // Хранилище
