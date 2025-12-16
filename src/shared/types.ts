@@ -25,3 +25,12 @@ export interface IResource {
     y: number;
     type: 'tree' | 'stone';
 }
+
+export interface IBuilding {
+    id: string; // Уникальный ID стены
+    x: number;
+    y: number;
+    hp: number;
+    maxHp: number;
+    ownerId: string; // Кто построил
+}

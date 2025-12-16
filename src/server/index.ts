@@ -2,9 +2,9 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import path from 'path';
-import { SOCKET_EVENTS, SERVER_PORT, WORLD_SIZE } from '@shared/constants';
+import { SOCKET_EVENTS, SERVER_PORT, WORLD_SIZE, TILE_SIZE,  } from '@shared/constants';
 import { Player } from './entities/Player';
-import { IInput, IResource } from '@shared/types';
+import { IInput, IResource, IBuilding  } from '@shared/types';
 
 const app = express();
 const httpServer = createServer(app);
@@ -20,6 +20,9 @@ const inputs: Record<string, IInput> = {};
 
 // Генерируем ресурсы (Деревья)
 let resources: IResource[] = [];
+
+let buildings: IBuilding[] = [];
+
 for (let i = 0; i < 50; i++) { // 50 деревьев
     resources.push({
         id: i,
@@ -30,6 +33,35 @@ for (let i = 0; i < 50; i++) { // 50 деревьев
 }
 
 app.use(express.static(path.join(__dirname, '../../public')));
+
+// Вспомогательная функция проверки коллизии (Круг игрока vs Квадрат стены)
+function checkCollision(player: Player, newX: number, newY: number): boolean {
+    const playerRadius = 20;
+    
+    // Проверяем каждую стену
+    for (const b of buildings) {
+        // Простая AABB проверка (квадрат с квадратом для скорости)
+        // Стена - это квадрат TILE_SIZE x TILE_SIZE с центром в (b.x, b.y) (или левый верхний угол? В Phaser обычно центр)
+        // Давайте договоримся: координаты стены - это её ЦЕНТР.
+        
+        const halfTile = TILE_SIZE / 2;
+        
+        // Границы стены
+        const wallLeft = b.x - halfTile;
+        const wallRight = b.x + halfTile;
+        const wallTop = b.y - halfTile;
+        const wallBottom = b.y + halfTile;
+
+        // Границы игрока (приближенно квадрат)
+        if (newX + playerRadius > wallLeft && 
+            newX - playerRadius < wallRight && 
+            newY + playerRadius > wallTop && 
+            newY - playerRadius < wallBottom) {
+            return true; // Столкновение!
+        }
+    }
+    return false;
+}
 
 io.on(SOCKET_EVENTS.CONNECT, (socket) => {
     console.log(`[+] Игрок ${socket.id}`);
@@ -45,7 +77,7 @@ io.on(SOCKET_EVENTS.CONNECT, (socket) => {
     inputs[socket.id] = { up: false, down: false, left: false, right: false };
 
     // ОТПРАВЛЯЕМ ИГРОКУ ДАННЫЕ О МИРЕ (Деревья)
-    socket.emit(SOCKET_EVENTS.INIT_WORLD, resources);
+    socket.emit(SOCKET_EVENTS.INIT_WORLD, { resources, buildings });
 
     socket.on('input', (data: IInput) => {
         inputs[socket.id] = data;
@@ -92,6 +124,40 @@ io.on(SOCKET_EVENTS.CONNECT, (socket) => {
         }
     });
     
+    // Обработка строительства
+    socket.on(SOCKET_EVENTS.PLAYER_BUILD, (data: { x: number, y: number }) => {
+        const player = players[socket.id];
+        if (!player) return;
+
+        // 1. Проверка ресурсов (Цена стены: 20 дерева)
+        if (player.inventory.wood < 20) return;
+
+        // 2. Проверка дистанции (нельзя строить далеко)
+        const dist = Math.sqrt((data.x - player.x)**2 + (data.y - player.y)**2);
+        if (dist > 150) return;
+
+        // 3. Проверка: занято ли место? (нельзя строить одну стену в другой)
+        const isOccupied = buildings.some(b => 
+            Math.abs(b.x - data.x) < 10 && Math.abs(b.y - data.y) < 10
+        );
+        if (isOccupied) return;
+
+        // СТРОИМ!
+        player.inventory.wood -= 20; // Списываем ресурсы
+
+        const newWall: IBuilding = {
+            id: Math.random().toString(36).substr(2, 9), // Простой ID
+            x: data.x,
+            y: data.y,
+            hp: 100,
+            maxHp: 100,
+            ownerId: socket.id
+        };
+        
+        buildings.push(newWall);
+        io.emit(SOCKET_EVENTS.NEW_BUILDING, newWall);
+    });
+
     socket.on(SOCKET_EVENTS.DISCONNECT, () => {
         console.log(`[-] Игрок ${socket.id}`);
         delete players[socket.id];
@@ -102,15 +168,34 @@ io.on(SOCKET_EVENTS.CONNECT, (socket) => {
 // === GAME LOOP (60 раз в секунду) ===
 const TICK_RATE = 60;
 setInterval(() => {
-    // 1. Обновляем физику всех игроков
     for (const id in players) {
-        if (inputs[id]) {
-            players[id].processInput(inputs[id]);
+        const p = players[id];
+        const input = inputs[id];
+        if (!input) continue;
+
+        // Предсказываем следующую позицию
+        let nextX = p.x;
+        let nextY = p.y;
+        
+        if (input.up) nextY -= p.speed;
+        if (input.down) nextY += p.speed;
+        if (input.left) nextX -= p.speed;
+        if (input.right) nextX += p.speed;
+
+        // Ограничение миром
+        nextX = Math.max(0, Math.min(WORLD_SIZE, nextX));
+        nextY = Math.max(0, Math.min(WORLD_SIZE, nextY));
+
+        // ПРОВЕРКА КОЛЛИЗИЙ СО СТЕНАМИ
+        // Проверяем X и Y отдельно, чтобы можно было скользить вдоль стены
+        if (!checkCollision(p, nextX, p.y)) {
+            p.x = nextX;
+        }
+        if (!checkCollision(p, p.x, nextY)) {
+            p.y = nextY;
         }
     }
 
-    // 2. Отправляем состояние мира всем клиентам
-    // io.emit (broadcast) - очень затратно, но для начала ОК
     io.emit(SOCKET_EVENTS.GAME_UPDATE, players);
 }, 1000 / TICK_RATE);
 

@@ -1,12 +1,13 @@
 import Phaser from 'phaser';
 import { io, Socket } from 'socket.io-client';
-import { SOCKET_EVENTS, WORLD_SIZE } from '@shared/constants';
-import { IPlayer, IInput } from '@shared/types';
+import { SOCKET_EVENTS, WORLD_SIZE, TILE_SIZE } from '@shared/constants';
+import { IPlayer, IInput, IBuilding } from '@shared/types';
 
 class GameScene extends Phaser.Scene {
     private socket!: Socket;
     private playersMap: Map<string, Phaser.GameObjects.Container> = new Map();
     private resourcesGroup!: Phaser.GameObjects.Group;
+    private buildingsGroup!: Phaser.GameObjects.Group; // Группа стен
     
     private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
     private wasd!: any;
@@ -18,6 +19,11 @@ class GameScene extends Phaser.Scene {
     private attackRate: number = 400;   // Задержка между ударами (мс) - 400мс это примерно 2.5 удара в сек
     // Храним состояние: какой рукой сейчас бить (для каждого игрока)
     private punchState: Map<string, boolean> = new Map(); // true = left, false = right
+    
+    // СТРОИТЕЛЬСТВО
+    private isBuildMode: boolean = false;
+    private ghostWall!: Phaser.GameObjects.Image; // Призрак
+    private keyB!: Phaser.Input.Keyboard.Key; // Кнопка B
 
     constructor() { super('GameScene'); }
 
@@ -33,20 +39,46 @@ class GameScene extends Phaser.Scene {
         graphics.fillStyle(0x333333); // Темно-серые перчатки
         graphics.fillCircle(6, 6, 6); // Чуть больше
         graphics.generateTexture('hand', 12, 12);
+
+        // WALL (Квадратная стена)
+        graphics.clear();
+        graphics.lineStyle(4, 0x333333); // Темная обводка
+        graphics.fillStyle(0x888888);    // Серый цвет
+        graphics.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+        graphics.strokeRect(0, 0, TILE_SIZE, TILE_SIZE);
+        graphics.generateTexture('wall', TILE_SIZE, TILE_SIZE);
     }
 
     create() {
         this.socket = io('http://localhost:3000');
         this.physics.world.setBounds(0, 0, WORLD_SIZE, WORLD_SIZE);
-        this.add.grid(WORLD_SIZE/2, WORLD_SIZE/2, WORLD_SIZE, WORLD_SIZE, 64, 64, 0x006400).setAltFillStyle(0x005000).setOutlineStyle();
+        this.add.grid(WORLD_SIZE/2, WORLD_SIZE/2, WORLD_SIZE, WORLD_SIZE, TILE_SIZE, TILE_SIZE, 0x004400).setAltFillStyle(0x003300).setOutlineStyle();
         this.resourcesGroup = this.add.group();
+        this.buildingsGroup = this.add.group(); // Создаем группу стен
         
         this.woodText = this.add.text(20, 20, 'Wood: 0', { fontSize: '24px', color: '#fff' }).setScrollFactor(0).setDepth(100);
+
+        // Подсказка
+        this.add.text(20, 50, '[B] Build Mode', { fontSize: '16px', color: '#aaa' }).setScrollFactor(0).setDepth(100);
 
         if (this.input.keyboard) {
             this.cursors = this.input.keyboard.createCursorKeys();
             this.wasd = this.input.keyboard.addKeys({ up: 38, down: 40, left: 37, right: 39, W: 87, A: 65, S: 83, D: 68 }) as any;
+        
+            // Кнопка B
+            this.keyB = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.B);
+            this.keyB.on('down', () => {
+                this.isBuildMode = !this.isBuildMode;
+                this.ghostWall.setVisible(this.isBuildMode);
+            });
+        
         }
+
+        // Призрачная стена (Скрыта по умолчанию)
+        this.ghostWall = this.add.image(0, 0, 'wall');
+        this.ghostWall.setAlpha(0.5); // Полупрозрачная
+        this.ghostWall.setVisible(false);
+        this.ghostWall.setDepth(50); // Поверх земли, но под игроком
 
         // Поворот за мышкой
         this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
@@ -57,7 +89,43 @@ class GameScene extends Phaser.Scene {
                 );
                 this.socket.emit(SOCKET_EVENTS.PLAYER_ROTATE, angle);
             }
+
+            // Движение призрака (Snap to Grid)
+            if (this.isBuildMode) {
+                const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+                // Округляем до сетки.
+                // Смещаем на половину тайла, т.к. якорь спрайта в центре
+                const snapX = Math.floor(worldPoint.x / TILE_SIZE) * TILE_SIZE + TILE_SIZE / 2;
+                const snapY = Math.floor(worldPoint.y / TILE_SIZE) * TILE_SIZE + TILE_SIZE / 2;
+                
+                this.ghostWall.setPosition(snapX, snapY);
+            
+                // Красим призрака в красный, если далеко
+                if (myContainer) {
+                    const dist = Phaser.Math.Distance.Between(myContainer.x, myContainer.y, snapX, snapY);
+                    this.ghostWall.setTint(dist > 150 ? 0xff0000 : 0xffffff);
+                }
+            }
         });
+
+        // INIT WORLD (теперь приходит объект {resources, buildings})
+        this.socket.on(SOCKET_EVENTS.INIT_WORLD, (data: { resources: any[], buildings: IBuilding[] }) => {
+            // Ресурсы
+            data.resources.forEach(res => {
+                const tree = this.add.image(res.x, res.y, 'tree');
+                tree.setName(res.id.toString());
+                this.resourcesGroup.add(tree);
+            });
+            // Стены
+            data.buildings.forEach(b => {
+                this.addBuilding(b);
+            });
+        });
+
+        // Новая стена построена кем-то
+        this.socket.on(SOCKET_EVENTS.NEW_BUILDING, (b: IBuilding) => {
+            this.addBuilding(b);
+        });        
 
         // УБРАЛИ pointerdown, перенесли в update
 
@@ -79,10 +147,15 @@ class GameScene extends Phaser.Scene {
 
         this.socket.on(SOCKET_EVENTS.GAME_UPDATE, (serverPlayers) => this.handleServerUpdate(serverPlayers));
 
-        // === НОВОЕ: Слушаем команду анимации от сервера ===
+        // Слушаем команду анимации от сервера ===
         this.socket.on(SOCKET_EVENTS.PLAYER_ANIMATION, (data: { id: string, type: string }) => {
             this.playAttackAnimation(data.id);
         });
+    }
+
+    private addBuilding(b: IBuilding) {
+        const wall = this.add.image(b.x, b.y, 'wall');
+        this.buildingsGroup.add(wall);
     }
 
     update() {
@@ -97,16 +170,23 @@ class GameScene extends Phaser.Scene {
         };
         this.socket.emit('input', input);
 
-        // 2. Атака (Зажатие кнопки)
         // input.activePointer - это мышка (или палец на телефоне)
+        // Клик (Атака ИЛИ Стройка)
         if (this.input.activePointer.isDown) {
             const now = Date.now();
-            // Проверяем кулдаун (не чаще чем раз в 400мс)
-            if (now - this.lastAttackTime > this.attackRate) {
+            if (now - this.lastAttackTime > 400) { // Общий кулдаун
                 this.lastAttackTime = now;
-                this.socket.emit(SOCKET_EVENTS.PLAYER_ATTACK);
-                // Анимацию не запускаем здесь! Мы ждем ответа от сервера (PLAYER_ANIMATION),
-                // чтобы все было синхронно у всех.
+
+                if (this.isBuildMode) {
+                    // РЕЖИМ СТРОЙКИ: Отправляем координаты призрака
+                    this.socket.emit(SOCKET_EVENTS.PLAYER_BUILD, { 
+                        x: this.ghostWall.x, 
+                        y: this.ghostWall.y 
+                    });
+                } else {
+                    // РЕЖИМ БОЯ: Бьем
+                    this.socket.emit(SOCKET_EVENTS.PLAYER_ATTACK);
+                }
             }
         }
     }
