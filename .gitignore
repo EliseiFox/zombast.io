@@ -31,3 +31,6 @@ Desktop.ini
 
 # TypeScript
 *.tsbuildinfo
+
+# Info files for me and AI and old files
+info/
