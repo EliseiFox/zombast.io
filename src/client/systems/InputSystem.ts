@@ -65,12 +65,6 @@ export class InputSystem {
                 if (this.isBuildMode) {
                     const pos = this.getGhostPosition();
                     this.network.emit(SOCKET_EVENTS.PLAYER_BUILD, pos);
-
-                    // Красим призрака в красный, если далеко
-                    if (myContainer) {
-                        const dist = Phaser.Math.Distance.Between(myContainer.x, myContainer.y, snapX, snapY);
-                        this.ghostWall.setTint(dist > 150 ? 0xff0000 : 0xffffff);
-                    }
                 } else {
                     this.network.emit(SOCKET_EVENTS.PLAYER_ATTACK);
                 }
